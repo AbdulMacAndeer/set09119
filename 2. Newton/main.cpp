@@ -3,11 +3,11 @@
 #define _USE_MATH_DEFINES
 #include <cmath>  
 #include <random>
+#include <iostream>
 
 // Std. Includes
 #include <string>
 #include <time.h>
-#include  <iostream>
 
 // GLM
 #include <glm/glm.hpp>
@@ -28,14 +28,13 @@
 GLfloat deltaTime = 0.0f;
 GLfloat lastFrame = 0.0f;
 
-//Vectors for physics
-//velocity, acc, force
-glm::vec3 v, a, f;
-//mass
-GLfloat mass = 1.0f;
-//gravity constant
-glm::vec3 g = glm::vec3(0.0f, -9.8f, 0.0f);
-GLfloat scale = 7.0f;
+//Vars
+int selection;
+float mass;
+//velocity, acc, force, gravity(-9.8 on y-axis)
+glm::vec3 v, a, f, g = glm::vec3(0.0f, -9.8f, 0.0f);
+glm::vec3 boundScale = glm::vec3(5.0f);
+
 
 // Random float
 float randf(float lo, float hi)
@@ -46,54 +45,68 @@ float randf(float lo, float hi)
 	return lo + r;
 }
 
+
 // main function
 int main()
 {
-	// create application
+	//Create application
 	Application app = Application::Application();
 	app.initRender();
 	Application::camera.setCameraPosition(glm::vec3(0.0f, 5.0f, 20.0f));
-			
-	// create ground plane
+
+	//Shaders
+	Shader lambert = Shader("resources/shaders/physics.vert", "resources/shaders/physics.frag");
+	Shader transparent= Shader("resources/shaders/physics.vert", "resources/shaders/solid_transparent.frag");
+	
+	//Create ground plane mesh
 	Mesh plane = Mesh::Mesh(Mesh::QUAD);
 	// scale it up x5
-	plane.scale(glm::vec3(5.0f, 5.0f, 5.0f));
-	Shader lambert = Shader("resources/shaders/physics.vert", "resources/shaders/physics.frag");
-	Shader transpar = Shader("resources/shaders/physics.vert", "resources/shaders/solid_transparent.frag");
+	plane.scale(boundScale);
+	//Apply Shader
 	plane.setShader(lambert);
-
+	
 	// create particle
-	Mesh particle1 = Mesh::Mesh(Mesh::QUAD);
+	Mesh particle1 = Mesh::Mesh("resources/models/sphere.obj");//Mesh::QUAD
 	//scale it down (x.1), translate it up by 2.5 and rotate it by 90 degrees around the x axis
 	particle1.translate(glm::vec3(0.0f, 2.5f, 0.0f));
 	particle1.scale(glm::vec3(.1f, .1f, .1f));
-	particle1.rotate((GLfloat) M_PI_2, glm::vec3(1.0f, 0.0f, 0.0f));
-	particle1.setShader(Shader("resources/shaders/solid.vert", "resources/shaders/solid_blue.frag"));
-	
-	// create bound box
+	particle1.rotate((GLfloat)M_PI_2, glm::vec3(1.0f, 0.0f, 0.0f));
+	particle1.setShader(Shader("resources/shaders/solid.vert", "resources/shaders/solid_red.frag"));
+
+	// create demo objects (a cube and a sphere)
+	Mesh sphere = Mesh::Mesh("resources/models/sphere.obj");
+	sphere.translate(glm::vec3(-1.0f, 1.0f, 0.0f));
+	sphere.setShader(lambert);
 	Mesh cube = Mesh::Mesh("resources/models/cube.obj");
-	cube.scale(glm::vec3(scale));
-	cube.translate(glm::vec3(0.0f, 3.5f, 0.0f));
-	cube.setShader(transpar);
-
-	// time
-	GLfloat firstFrame = (GLfloat) glfwGetTime();
+	cube.translate(glm::vec3(1.0f, .5f, 0.0f));
+	cube.setShader(lambert);
 	
-	//set initial pos
-	v = glm::vec3(randf(-5.0f,5.0f));
+	//Create a box for collision
+	Mesh bounds = Mesh::Mesh("resources/models/cube.obj");
+	bounds.translate(glm::vec3(0.0f, 2.5f, 0.0f));
+	bounds.scale(boundScale);
+	bounds.setShader(transparent);
 
-	glm::vec3 cubePos = glm::vec3(cube.getPos() - 0.5f*scale);
-	glm::vec3 cubeSize = glm::vec3(cube.getPos() +scale);
-	float energyDrain = 1.05f;
-	float airDensity = 1.225f;
-	float cubeCd = 1.05f;
-	glm::vec3 windV = glm::vec3(50.0f, 0.0f, 0.0f);
+	//Time
+	GLfloat firstFrame = (GLfloat)glfwGetTime();
+
+	//Initial position
+	v = glm::vec3(randf(2.5f, 8.0f));
+	
+	//Local vars for physics
+	float energyLoss = 1.25f; //Energy lost on each bounce
+	float airDens = 1.225f; //Density of the air
+	float crossSectional = 125.0f; //CrossSectional of Cube area
+	float dragCoefficient = 1.05f;//1.05-1.15 for quad shaped particle, 0.47 for sphere
+	
+	//Give particle1 some mass
+	mass = 1.0f;
 
 	// Game loop
 	while (!glfwWindowShouldClose(app.getWindow()))
 	{
 		// Set frame time
-		GLfloat currentFrame = (GLfloat)  glfwGetTime() - firstFrame;
+		GLfloat currentFrame = (GLfloat)glfwGetTime() - firstFrame;
 		// the animation can be sped up or slowed down by multiplying currentFrame by a factor.
 		currentFrame *= 1.5f;
 		deltaTime = currentFrame - lastFrame;
@@ -104,83 +117,88 @@ int main()
 		*/
 		// Manage interaction
 		app.doMovement(deltaTime);
-
+		//Press E to start again
+		if (app.keys[GLFW_KEY_E])
+		{
+			particle1.setPos(glm::vec3(randf(-2.49f, 2.49f), randf(2.5f, 4.99f), randf(-2.49f, 2.49f)));
+			v = glm::vec3(glm::vec3(randf(2.5f, 8.0f), randf(2.5f, 8.0f), randf(2.5f, 8.0f)));			
+		}
+				
 		/*
 		**	SIMULATION
 		*/
-		//Task 1
-		// compute force
-		f = g;
-		// compute acceleration
-		a = f/mass;
-		//Update Position
-		v += deltaTime*a;
-
-		//Task 2 - Collisions
-		//Get vectors of positions 
-		glm::vec3 p1pos = glm::vec3(particle1.getPos());
-		glm::vec3 cubepos = glm::vec3(cube.getPos());
 		
-		////if particle exceeds X
-		//if ((p1pos.x >= (cubepos.x + 0.5f*scale)) || (p1pos.x <= (cubepos.x - 0.5f*scale)))
-		//{
-		//	v *= glm::vec3(-1.0f, 1.0f, 1.0f) / 1.05f;
-		//}
-		////if particle exceeds Y - cube.getTranslate()[3][1] - cube.getPos().y)
-		//if ((p1pos.y <= (cubepos.y - 0.5f*scale)) || (p1pos.y >= (cubepos.y + 0.5f*scale)))
-		//{
-		//	v *= glm::vec3(1.0f, -1.0f, 1.0f) / 1.05f;
-		//}
-		////if particle exceeds z
-		//if ((p1pos.z <= (cubepos.z - 0.5f*scale)) || (p1pos.z >= (cubepos.z + 0.5f*scale)))
-		//{
-		//	v *= glm::vec3(1.0f, 1.0f, -1.0f) / 1.05f;
-		//}
-		//
+		//Compute Forces
+		//Areodrag
+		float fDrag = airDens*0.5f*a.x*a.x*dragCoefficient*crossSectional;
+		f = g + fDrag;
+		//Compute Acceleration
+		a = f / mass;
+		//Compute Velocity
+		v += deltaTime * a;
 
-		particle1.translate(deltaTime*v);
+		//Get the corners of the bounds cube in a vec
+		glm::vec3 corner;
+
 		for (int i = 0; i < 3; i++)
 		{
-			if (particle1.getPos()[i] >= cubePos[i])
-			{
-				glm::vec3 particlePosition = glm::vec3(particle1.getPos().x, particle1.getPos().y, particle1.getPos().z);
-				particlePosition[i] = cubePos[i];
-				particle1.setPos(particlePosition);
-				v[i] = -v[i] / energyDrain;
-			}
-			else if (particle1.getPos()[i] <= (cubePos[i] - cubeSize[i]))
-			{
-				glm::vec3 particlePosition = glm::vec3(particle1.getPos().x, particle1.getPos().y, particle1.getPos().z);
-				particlePosition[i] = cubePos[i] - cubeSize[i];
-				particle1.setPos(particlePosition);
-				v[i] = -v[i] / energyDrain;
-			}
+			corner[i] = (bounds.getPos()[i] + 0.5f*boundScale[i]);
 		}
-		
-		////TASK 3
-		//// Add forces
-		//glm::vec3 fgravity = mass * g;
-		//glm::vec3 faero = 0.5f * 1.225f * glm::vec3(50.0f, 0.0f, 0.0f) * glm::vec3(50.0f, 0.0f, 0.0f) * * (0.1*0.1) * -1.0f;
-		//glm::vec3 totalForce = fgravity + faero;
-		//// Compute acceleration
-		//a = totalForce / mass;
-		//// Integrate to calculate velocity and position
-		//v = v + a * deltaTime;
-		//particle1.translate(v * deltaTime);
+	
+		//for each x,y,z in particle and bounds
+		for (int i = 0; i < 3; i++)
+		{
+			//if particles x,y,z is further than bounds
+			if (particle1.getPos()[i] >= corner[i])
+			{
+				//Get the current position
+				glm::vec3 p1Pos = glm::vec3(particle1.getPos().x, particle1.getPos().y, particle1.getPos().z);
+				//Set axis to corners position
+				p1Pos[i] = corner[i];
+				//reverse velocity of axis
+				v[i] = -v[i];
+				//apply loss of energy
+				v /= energyLoss;
+				//apply the change to position vector
+				particle1.setPos(p1Pos);
+			}
+			//if particles x,y,z is less than bounds
+			else if (particle1.getPos()[i] <= (corner[i] - boundScale[i]))
+			{
+				//Get the current position
+				glm::vec3 p1Pos = glm::vec3(particle1.getPos().x, particle1.getPos().y, particle1.getPos().z);
+				//Set axis to corners position
+				p1Pos[i] = corner[i] - boundScale[i];
+				//reverse velocity of axis
+				v[i] = -v[i];
+				//apply loss of energy
+				v /= energyLoss;
+				//apply the change to position vector
+				particle1.setPos(p1Pos);
+			}
+		}	
+
+		//Apply the translation
+		particle1.translate(deltaTime*v);
 
 		/*
-		**	RENDER 
-		*/		
+		**	RENDER
+		*/
 		// clear buffer
 		app.clear();
 		// draw groud plane
 		app.draw(plane);
 		// draw particles
-		app.draw(particle1);	
+		app.draw(particle1);
 
-		// draw bounds objects
-		app.draw(cube);
+		// draw demo objects
+		//app.draw(cube);
+		//app.draw(sphere);
 
+		//draw the bounds
+		app.draw(bounds);
+
+		//Show
 		app.display();
 	}
 
