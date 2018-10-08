@@ -49,6 +49,9 @@ float randf(float lo, float hi)
 // main function
 int main()
 {
+	//Note to user
+	std::cout << "Press E to reset";
+
 	//Create application
 	Application app = Application::Application();
 	app.initRender();
@@ -66,7 +69,7 @@ int main()
 	plane.setShader(lambert);
 	
 	// create particle
-	Mesh particle1 = Mesh::Mesh("resources/models/sphere.obj");//Mesh::QUAD
+	Mesh particle1 = Mesh::QUAD;//  Mesh::Mesh("resources/models/sphere.obj");
 	//scale it down (x.1), translate it up by 2.5 and rotate it by 90 degrees around the x axis
 	particle1.translate(glm::vec3(0.0f, 2.5f, 0.0f));
 	particle1.scale(glm::vec3(.1f, .1f, .1f));
