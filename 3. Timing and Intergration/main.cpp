@@ -5,6 +5,7 @@
 #include <cmath>  
 #include <random>
 #include <iostream>
+#include <numeric>
 
 // Std. Includes
 #include <string>
@@ -27,19 +28,23 @@
 #include "Body.h"
 #include "Particle.h"
 
-// time
+// include 
+using namespace std;
+
+//Time
 GLfloat deltaTime = 0.0f;
 GLfloat lastFrame = 0.0f;
 
 //Vars
 int selection;
-//force, gravity(-9.8 on y-axis)
-glm::vec3 f, g = glm::vec3(0.0f, -9.8f, 0.0f);
+//Forces, gravity(-9.8 on y-axis)
+glm::vec3 f, fGravity = glm::vec3(0.0f, -9.8f, 0.0f);
+//Scalar for room size
 glm::vec3 boundScale = glm::vec3(5.0f);
-//bools
-bool energyOn = false;
-// Vector that store particles
-std::vector<Particle> particles;
+//Bools
+bool gravityOn = false;
+//Vector that store particles
+vector<Particle> particles;
 #pragma endregion
 
 #pragma region Methods
@@ -51,8 +56,15 @@ float randf(float lo, float hi)
 	float r = random * diff;
 	return lo + r;
 }
-
-//Semi-implicit
+//Areodynamic Drag
+float getDrag(float airDens, Particle &par, float dragCoEffic, float area)
+{
+	float a = par.getPos().x + par.getPos().y + par.getPos().z;
+	a /= 3;
+	float Fd = airDens * 0.5f *(a*a)*dragCoEffic*area;
+	return Fd;
+}
+//Simplectic Euler integration
 void integrate(Particle &par, float dt)
 {
 	//Calc new Velocity
@@ -60,7 +72,6 @@ void integrate(Particle &par, float dt)
 	//Translate
 	par.translate(par.getVel() * dt);
 }
-
 //Forward Euler integration
 void integrateForward(Particle &par, float dt)
 {
@@ -70,16 +81,37 @@ void integrateForward(Particle &par, float dt)
 	par.setVel(par.getVel() + dt * par.getAcc());
 	par.translate(dt * preVel);
 }
+//Find location in circle
+bool isInsideCircle(int rad, Particle &par)
+{
+	// Compare radius of circle with distance of its center from given point 
+	if ((par.getPos().x - 0.0f) * (par.getPos().x - 0.0f) + (par.getPos().y - 0.0f) * (par.getPos().y - 0.0f) <= rad * rad)
+		return true;
+	else
+		return false;
+}
+//Returns true if the Particle is in the object
+bool isInsideCone(glm::vec3 coneTipPosition, glm::vec3 coneCenterLine,  Particle &par, float FOVRadians, float height)
+{
+	//Get the difference vector
+	glm::vec3 difference = par.getPos() - coneTipPosition;
+	//dot product for projection
+	double result = glm::dot(coneCenterLine, difference);
+	//if in the view/angle from the origin of the cone
+	if (result > cos(FOVRadians))
+		return true;
+	else
+		return false;
+}
 #pragma endregion
 
 // main function
 int main()
 {
 	//Note to user
-	std::cout << "Press E to reset" << std::endl;
-	std::cout << "Press 1 to turn on loss of energy" << std::endl;
-	std::cout << "Press 2 to turn off loss of energy" << std::endl;
-	std::cout << " " << std::endl;
+	cout << "Press E to reset" << endl;
+	cout << "Gravity is off. Press 1 to turn on" << endl;
+	cout << " " << endl;
 
 	//Create application
 	Application app = Application::Application();
@@ -89,33 +121,35 @@ int main()
 	//Shaders
 	Shader lambert = Shader("resources/shaders/physics.vert", "resources/shaders/physics.frag");
 	Shader transparent = Shader("resources/shaders/physics.vert", "resources/shaders/solid_transparent.frag");
-	Shader particleShader = Shader("resources/shaders/solid.vert", "resources/shaders/solid_green.frag");
+	Shader greenShader = Shader("resources/shaders/solid.vert", "resources/shaders/solid_green.frag");
+	Shader redShader = Shader("resources/shaders/solid.vert", "resources/shaders/solid_red.frag");
+	Shader blueShader = Shader("resources/shaders/solid.vert", "resources/shaders/solid_blue.frag");
 
 	//Create ground plane mesh
 	Mesh plane = Mesh::Mesh(Mesh::QUAD);
-	// scale it up x5
+	//Scale it up x5
 	plane.scale(boundScale);
 	//Apply Shader
 	plane.setShader(lambert);
-
+	
 	//Create the particles
-	for (int i = 0; i < 3; i++)
+	for (int i = 0; i < 4; i++)
 	{
 		//Move array pointer with new particle
 		particles.push_back(Particle());
 		//Translate
-		particles[i].translate(glm::vec3(-1.0f + i, 2.5f, 0.0f));
+		particles[i].setPos(glm::vec3(-1.5f + i, 2.5f, 0.0f));
 		//Rotate
 		particles[i].rotate((GLfloat)M_PI_2, glm::vec3(1.0f, 0.0f, 0.0f));
 		//apply shader
-		particles[i].getMesh().setShader(particleShader);
+		particles[i].getMesh().setShader(blueShader);
 		//Positions
-		particles[i].setVel(glm::vec3(randf(2.5f, 8.0f)));
+		particles[i].setVel(glm::vec3(0.0f));
 		//Give mass
 		particles[i].setMass(1.0f);
 	}
 
-	//Create a box for collision
+	//Create a room for collision
 	Mesh bounds = Mesh::Mesh("resources/models/cube.obj");
 	bounds.translate(glm::vec3(0.0f, 2.5f, 0.0f));
 	bounds.scale(boundScale);
@@ -129,12 +163,23 @@ int main()
 	double timeAccumulator = 0.0;
 
 	//vars for areodrag 
-	float energyLoss = 1; //Energy lost on each bounce
-	float airDens = 1.225f; //Density of the air
-	float crossSectional = 125.0f; //CrossSectional of Cube area
-	float dragCoefficient = 0.47f;//1.05-1.15 for quad shaped particle, 0.47 for sphere
+	float airDens = 1.05f; //Density of the air
+	float crossSectional = 0.125f; //CrossSectional of Cube area
+	float dragCoefficient = 0.47f; //1.05-1.15 for quad shaped particle, 0.47 for sphere
 
-								  // Game loop
+	//vars for coneblow dryer
+	//floats
+	float coneFOV = M_PI / 5; //Field of view (36 degrees)
+	float radiusConeBase = 1.5f;
+	float radiusConeTop = 2.0f;
+	float coneHeight = 1.5f;
+	float circumConeBase = 2 * M_PI * radiusConeBase;
+	//Vectors
+	glm::vec3 coneTipPos = glm::vec3(0.0f, -0.2f, 0.0f);
+	glm::vec3 coneDir = glm::vec3(0.0f, 1.0f, 0.0f);
+	glm::vec3 fWind = glm::vec3(0.0f);
+
+	// Game loop
 	while (!glfwWindowShouldClose(app.getWindow()))
 	{
 		// Timekeeping
@@ -153,79 +198,84 @@ int main()
 			//Press E to start again
 			if (app.keys[GLFW_KEY_E])
 			{
-				for (int i = 1; i < 3; i++)
+				for (int i = 0; i < 4; i++)
 				{
 					//Translate
-					particles[i].translate(glm::vec3(-1.0f + i, 2.5f, 0.0f));
-					particles[i].setVel(glm::vec3(glm::vec3(randf(2.5f, 8.0f), randf(2.5f, 8.0f), randf(2.5f, 8.0f))));
-					app.keys[GLFW_KEY_E] = false;
-				}
-			}
-			//Press R to set initial pos to 0
-			if (app.keys[GLFW_KEY_R])
-			{
-				for (int i = 1; i < 3; i++)
-				{
-					//Translate
-					particles[i].translate(glm::vec3(-1.0f + i, 2.5f, 0.0f));
+					particles[i].setPos(glm::vec3(-1.5f + i, 2.5f, 0.0f));
 					particles[i].setVel(glm::vec3(0.0f));
-					app.keys[GLFW_KEY_R] = false;
+					app.keys[GLFW_KEY_E] = false;
 				}
 			}
 			if (app.keys[GLFW_KEY_1])
 			{
-				energyOn = false;
-				std::cout << "Energy loss on" << std::endl;
+				if (gravityOn)
+				{
+					gravityOn = false;
+					cout << "Gravity off" << endl;
+				}
+				else
+				{
+					gravityOn = true;
+					cout << "Gravity on" << endl;
+				}
 				app.keys[GLFW_KEY_1] = false;
 			}
-			if (app.keys[GLFW_KEY_2])
-			{
-				energyOn = true;
-				std::cout << "Energy Loss off" << std::endl;
-				app.keys[GLFW_KEY_2] = false;
-			}
-
 			/*
 			**	SIMULATION
 			*/
 
-			for (int i = 1; i < 3; i++)
+			for (int i = 0; i < 4; i++)
 			{
 				//Compute Forces
 				//Areodrag
-				float fDrag;
-				fDrag = airDens * 0.5f* particles[i].getAcc().x * particles[i].getAcc().x *dragCoefficient*crossSectional;
-				//Add forces
-				f = g + fDrag;
-
-				//if energyloss is on
-				if (energyOn)
-					energyLoss = 0.70f;
+				glm::vec3 fDrag = glm::vec3(getDrag(airDens, particles[i], dragCoefficient, crossSectional));
+				
+				//Blowdryer
+				//inside the cone
+				if (isInsideCone(coneTipPos, coneDir, particles[i], coneFOV, coneHeight))
+				{
+					//Get the displacment transform for direction to send particle
+					glm::vec3 displacement = particles[i].getPos() - coneTipPos;
+					//Power of the force
+					//Get the projection details
+					float y = glm::dot(particles[i].getPos() - coneTipPos, coneDir);//From cone origin centre to particle pos
+					glm::vec3 projection;
+					projection.y = y; //From cone centre to particle pos
+					projection.x = (y / coneHeight) * radiusConeBase; //Radius size of particle pos
+					projection.z = 0.0f;
+					float xzFade = 1 - (glm::length((particles[i].getPos() - coneTipPos) - (projection.x * coneDir)));
+					float windFade = (1 - projection.y / coneHeight) * (xzFade / projection.x);
+					//set the force with a normalized vector of the displacement and apply wind power fade off
+					fWind = glm::normalize(displacement) * windFade;
+					//scale the force for effect
+					fWind *= 30;									
+				}				
 				else
-					energyLoss = 1;
+				{
+					//stop the force
+					fWind *= 0.25f;
+				}
+
+				//Add forces
+				f = fDrag + fWind;
+				
+				//add gravity if user toggles
+				if (gravityOn)
+					f += fGravity;
 
 				//Set Acceleration
 				particles[i].setAcc(f / particles[i].getMass());
 
 				//Intergrate
-				if (i == 1)
-				{
-					integrate(particles[i], dt);
-				}
-				else
-				{
-					integrateForward(particles[i], dt);
-				}
-
-				///Collision
+				integrate(particles[i], dt);
+				
+				#pragma region Collision with Bounds of Room	
 				//Get the corners of the bounds cube in a vec
 				glm::vec3 corner;
-
-				for (int i = 0; i < 3; i++)
+				for (int axis = 0; axis < 3; axis++)
 				{
-					corner[i] = (bounds.getPos()[i] + 0.5f*boundScale[i]);
-				}
-
+					corner[axis] = (bounds.getPos()[axis] + 0.5f*boundScale[axis]);
+				}		
 				//for each x,y,z in particle and bounds
 				for (int j = 0; j < 3; j++)
 				{
@@ -235,12 +285,11 @@ int main()
 						//Get the current position
 						glm::vec3 prevPos = particles[i].getPos();
 						//Set axis in contact to corners position
-						prevPos[j] = corner[j];
+						prevPos[j] = corner[j] - 0.05f;
 						//get velocity
 						glm::vec3 prevVel = particles[i].getVel();
 						//reverse velocity of axis
 						prevVel[j] = -particles[i].getVel()[j];
-						prevVel *= energyLoss;
 						//apply the change to position vector
 						particles[i].setPos(prevPos);
 						particles[i].setVel(prevVel);
@@ -251,17 +300,17 @@ int main()
 						//Get the current position
 						glm::vec3 prevPos = particles[i].getPos();
 						//Set axis in contact to corners position
-						prevPos[j] = corner[j] - boundScale[j];
+						prevPos[j] = corner[j] - boundScale[j] + 0.05f;
 						//get velocity
 						glm::vec3 prevVel = particles[i].getVel();
 						//reverse velocity of axis
 						prevVel[j] = -particles[i].getVel()[j];
-						prevVel *= energyLoss;
 						//apply the change to position vector
 						particles[i].setPos(prevPos);
 						particles[i].setVel(prevVel);
 					}
 				}
+				#pragma endregion
 			}
 
 			//update time step
@@ -287,6 +336,8 @@ int main()
 			app.draw(p.getMesh());
 		}
 
+		app.draw(particles[1].getMesh());
+		app.draw(particles[2].getMesh());
 		//draw the bounds
 		app.draw(bounds);
 
@@ -294,7 +345,7 @@ int main()
 		app.display();
 
 		//Debug - Console information
-		//std::cout << 1.0f / frameTime << " fps" << std::endl;
+		//cout << 1.0f / frameTime << " fps" << endl;
 	}
 
 	app.terminate();

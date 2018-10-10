@@ -51,8 +51,7 @@ float randf(float lo, float hi)
 	float r = random * diff;
 	return lo + r;
 }
-
-//Semi-implicit
+//Simplectic Euler integration
 void integrate(Particle &par, float dt)
 {
 	//Calc new Velocity
@@ -60,26 +59,26 @@ void integrate(Particle &par, float dt)
 	//Translate
 	par.translate(par.getVel() * dt);
 }
-
 //Forward Euler integration
 void integrateForward(Particle &par, float dt)
 {
 	//Get prev Velocity
-	glm::vec3 preVel = par.getVel(); 
+	glm::vec3 preVel = par.getVel();
 	//Calc velocity
 	par.setVel(par.getVel() + dt * par.getAcc());
 	par.translate(dt * preVel);
 }
+
 #pragma endregion
 
 // main function
 int main()
 {
 	//Note to user
-	std::cout << "Press E to reset" << std::endl;
+	std::cout << "Press E to reset" << std::endl;	
 	std::cout << "Press R to set initial Position to 0.0f (u = 0.0f)" << std::endl;
-	std::cout << "Press 1 to turn on loss of energy" << std::endl;
-	std::cout << "Press 2 to turn off loss of energy" << std::endl;
+	std::cout << "Press 1 to turn off loss of energy (off by default)" << std::endl;
+	std::cout << "Press 2 to turn on loss of energy" << std::endl;
 	std::cout << " " << std::endl;
 	
 	//Create application
@@ -172,13 +171,13 @@ int main()
 			if (app.keys[GLFW_KEY_1])
 			{
 				energyOn = false;
-				std::cout << "Energy loss on" << std::endl;
+				std::cout << "Energy loss off" << std::endl;
 				app.keys[GLFW_KEY_1] = false;
 			}
 			if (app.keys[GLFW_KEY_2])
 			{
 				energyOn = true;
-				std::cout << "Energy Loss off" << std::endl;
+				std::cout << "Energy loss on" << std::endl;
 				app.keys[GLFW_KEY_2] = false;
 			}
 
@@ -222,14 +221,15 @@ int main()
 					//get velocity
 					glm::vec3 prevVel = particles[i].getVel();
 					//reverse velocity of axis
-					prevVel.y = -particles[i].getVel().y * energyLoss;
+					prevVel.y = -particles[i].getVel().y;// *energyLoss;
+					prevVel *= energyLoss;
 					
 					//apply the change to position vector
 					particles[i].setPos(prevPos);
 					particles[i].setVel(prevVel);
 				}		
 			}
-
+			
 			//update time step
 			timeAccumulator -= dt;
 			time += dt;
