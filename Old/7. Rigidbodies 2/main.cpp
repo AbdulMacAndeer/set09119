@@ -6,17 +6,21 @@
 #include <random>
 #include <iostream>
 #include <numeric>
+
 // Std. Includes
 #include <string>
 #include <time.h>
+
 // GLM
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/matrix_operation.hpp>
 #include "glm/ext.hpp"
+
 // Other Libs
 #include "SOIL2/SOIL2.h"
+
 // project includes
 #include "Application.h"
 #include "Shader.h"
@@ -39,9 +43,7 @@ float amount;
 //Scalar for room size
 glm::vec3 boundScale = glm::vec3(5.0f);
 
-//Booleans for impluse and collisions
 bool impulsed = false;
-bool isCollision = false;
 
 //bool for task switching
 bool planeOn = false;
@@ -183,7 +185,7 @@ int main()
 	//DragCoefficient
 	float dragCoeff = 0.47f;
 		
-	//impulse vars
+	// impulse elements
 	float e = 1.0f;
 	std::vector<glm::vec3> collisionEdges; //Collision vertices
 	glm::vec3 coM; //Center of mass
@@ -208,28 +210,24 @@ int main()
 	Mesh m = Mesh::Mesh(Mesh::CUBE);//create a mesh
 	rb.setMesh(m);//give mesh to the rigidbody
 	rb.getMesh().setShader(lambert); //set shader
-	rb.setMass(2.0f); //Give it mass
+	rb.setMass(1.0f); //Give it mass
 	rb.scale(glm::vec3(1.0f, 3.0f, 1.0f)); //Scale it
 									 
 	//translate
 	rb.translate(glm::vec3(0.0f, 5.0f, 0.0f));
 	//set initial velocity
 	rb.setVel(glm::vec3(0.0f, 0.0f, 0.0f));
-	//set angular velocity torque
+	//give torque
 	rb.setAngVel(glm::vec3(0.0f, 0.0f, 0.0f));
-	//set elasticity
-	e = 1;
 	//add gravity to Rigidbody
-	rb.addForce(g);
-
-	cout << "Inertia matrix " << glm::to_string(rb.getInvInertia()) << endl;
+	//rb.addForce(g);
 
 #pragma region GameLoop
 	// Game loop
 	while (!glfwWindowShouldClose(app.getWindow()))
 	{
 		// Timekeeping
-		GLfloat newTime = (GLfloat)glfwGetTime();
+		GLfloat newTime = (double)glfwGetTime();
 		GLfloat frameTime = newTime - currentTime;
 		physicsTimer += frameTime;
 		currentTime = newTime;
@@ -251,29 +249,37 @@ int main()
 			/*
 			**	SIMULATION
 			//*/
-
-			//intergration ( movement) 
-			//integration (translation)
+			// intergration ( movement) 
+			// integration (translation)
 			rb.setAcc(rb.applyForces(rb.getPos(), rb.getVel(), time, dt));
 			rb.setVel(rb.getVel() + dt * rb.getAcc());
 			rb.translate(rb.getVel() * dt);
 
-			//integration ( rotation )
+			//Apply forces
+
+			// integration ( rotation )
 			rb.setAngVel(rb.getAngVel() + deltaTime * rb.getAngAcc());
 
-			//create skew symmetric matrix for w
+			// create skew symmetric matrix for w
 			glm::mat3 angVelSkew = glm::matrixCross3(rb.getAngVel());
 
-			//create 3x3 rotation matrix from rb rotation matrix
+			// create 3x3 rotation matrix from rb rotation matrix
 			glm::mat3 R = glm::mat3(rb.getRotate());
 
-			//update rotation matrix
+			// update rotation matrix
 			R += deltaTime * angVelSkew *R;
 			R = glm::orthonormalize(R);
 			rb.setRotate(glm::mat4(R));
-						
+
+			glm::vec3 j = glm::vec3(-5.0f, 3.0f, 0.0f);
+			if (currentTime > 2.0f && !impulsed)
+			{
+				rb.setVel(rb.getVel() + j / rb.getMass());
+				rb.setAngVel(rb.getInvInertia() * glm::cross(rb.getPos() + glm::vec3(1.0f, 0.0f, 0.0f) - rb.getPos(), j));
+				impulsed = true;
+			}			
 			//Collisions
-			//Plane collision
+			// Plane collision
 			for (auto vertex : rb.getMesh().getVertices())
 			{
 				//mesh * coords = 3d co-orods
@@ -282,62 +288,30 @@ int main()
 				//if collision
 				if (coordinates.y <= plane.getPos().y)
 				{
-					//Add to collisions
+					//stop simulation
+					//dt = 0;
 					collisionEdges.push_back(coordinates);
-					isCollision = true;
 				}
 			}
 
-			//If there are collisions
-			if ((collisionEdges.size() != 0) && (isCollision))
-			{
-				//Vector for average of collision points
-				glm::vec3 averages;
-				//Vertex, 1 point
-				if (collisionEdges.size() == 1)
-					averages = collisionEdges[0];
-				//Edge, 2 points
-				else if (collisionEdges.size() == 2)
-					averages = (collisionEdges[0] + collisionEdges[1]) / 2;
-				//Face, 4 points
-				else if (collisionEdges.size() == 4)
-				{
-					averages = ((collisionEdges[0] + collisionEdges[1]) + (collisionEdges[2] + collisionEdges[3])) / 4;
-				}
+			//if (!collisionEdges.empty())
+			//{
+			//	//coM = collisionEdges.all;
+			//	//glm::vec3(rb.getPos().x, rb.getPos().y - 3.0f, rb.getPos().z);
+			//	
+			//	rb.translate(glm::vec3(0.0f, plane.getPos().y + 0.01f, 0.0f)); //Reset to plane position
+			//	glm::vec3 r = coM - rb.getPos();//Get CoM - pos
+			//	glm::vec3 n = glm::vec3(0.0f, 1.0f, 0.0f); //normal vector
+			//	n = glm::normalize(n);
+			//	glm::vec3 vr = rb.getVel() + glm::cross(rb.getAngVel(), r);// Relative veloctiy
+			//	
+			//	glm::vec3 jrC = (-(1.0f + e) * vr * n);
+			//	glm::vec3 jrD = ((1 / rb.getMass()) + n * (rb.getInvInertia()*glm::cross(glm::cross(r, n), r)));
+			//	glm::vec3 jr = jrC / jrD;
 
-				//Print details
-				cout << "Average of collision: " << glm::to_string(averages) << endl;
-				cout << "Co-ordinates of colliding vertices: \n" << endl;
-				for (int i = 0; i < collisionEdges.size(); i++)
-				{
-					cout << i + 1 << " : " << glm::to_string(collisionEdges[i]) << endl;
-					if (i == 3)
-					{ 
-						i = collisionEdges.size();
-					}
-				}
-
-				//Shift first collision point of rb back to above the plane
-				rb.translate(glm::vec3(0.0f, plane.getPos().y - collisionEdges[0].y, 0.0f));
-
-				//Get r (Com and collision point)
-				glm::vec3 r = averages - rb.getPos();
-				//Get normal of the plane
-				glm::vec3 n = glm::vec3(0.0f, 1.0f, 0.0f);
-				//Get the r relative velocity (vel + (Angle Velocity Xross r)
-				glm::vec3 vr = rb.getVel() + glm::cross(rb.getAngVel(), r);
-				
-				//Calculate the impulse (jr)
-				float jr = (-(1.0f + e) * glm::dot(vr, n)) / ((1 / rb.getMass()) + glm::dot(n, (glm::cross(rb.getInvInertia()* glm::cross(r, n), r))));
-				
-				//Update velocity and angular velocity
-				rb.setVel(rb.getVel() + (jr / rb.getMass())*n);
-				rb.setAngVel(rb.getAngVel() + jr * rb.getInvInertia() * glm::cross(r, n));
-				//Clear Array
-				collisionEdges.clear();
-				//Change bool
-				isCollision = false;
-			}
+			//	applyImpulse(rb, jr, r, n);
+			//	
+			//}
 			
 			//update time step
 			timeAccumulator -= dt;
